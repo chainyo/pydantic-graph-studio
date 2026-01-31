@@ -1,0 +1,29 @@
+[project]
+name = "pydantic-graph-studio"
+version = "0.1.0"
+description = "A lightweight studio/CLI scaffold for pydantic-graph projects."
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Thomas Chaigneau", email = "thomas@chainyo.dev" }]
+keywords = ["pydantic", "pydantic-graph", "graph", "studio"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic-graph>=1.50.0",
+]
+
+[project.scripts]
+pydantic-graph-studio = "pydantic_graph_studio:main"
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"
