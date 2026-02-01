@@ -21,8 +21,32 @@ dependencies = [
     "pydantic-graph>=1.50.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.14.14",
+    "ty>=0.0.14",
+]
+
 [project.scripts]
 pydantic-graph-studio = "pydantic_graph_studio:main"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ty]
 
 [build-system]
 requires = ["uv_build>=0.9.5,<0.10.0"]

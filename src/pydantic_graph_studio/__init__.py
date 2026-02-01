@@ -1,9 +1,9 @@
 """Pydantic Graph Studio entrypoint."""
 
 from pydantic_graph_studio.schemas import (
+    EdgeTakenEvent,
     ErrorEvent,
     Event,
-    EdgeTakenEvent,
     EventBase,
     GraphEdge,
     GraphModel,

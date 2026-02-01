@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 
@@ -73,7 +73,7 @@ class ErrorEvent(EventBase):
 
 
 Event = Annotated[
-    Union[NodeStartEvent, NodeEndEvent, EdgeTakenEvent, RunEndEvent, ErrorEvent],
+    NodeStartEvent | NodeEndEvent | EdgeTakenEvent | RunEndEvent | ErrorEvent,
     Field(discriminator="event_type"),
 ]
 
