@@ -5,11 +5,13 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from importlib import resources
 from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic_graph import Graph
 from pydantic_graph.nodes import BaseNode
 
@@ -94,6 +96,9 @@ def create_app(
     persistence: Any = None,
 ) -> FastAPI:
     """Create the FastAPI app bound to a graph and start node."""
+    ui_root = resources.files("pydantic_graph_studio.ui")
+    index_html = (ui_root / "index.html").read_text(encoding="utf-8")
+    assets_dir = ui_root / "assets"
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -154,5 +159,12 @@ def create_app(
             "Connection": "keep-alive",
         }
         return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+
+    app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/")
+    async def studio_index() -> HTMLResponse:
+        """Serve the bundled studio UI."""
+        return HTMLResponse(index_html)
 
     return app
