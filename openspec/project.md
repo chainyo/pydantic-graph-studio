@@ -51,6 +51,7 @@ Non-goals include visual editing, persistence, authentication, and cloud hosting
 - Minimal metaprogramming
 - Composition over inheritance
 - Full type annotations on public APIs
+- Docstrings on public modules, classes, and functions
 - Async-safe code paths (even when executed synchronously)
 
 Formatting and linting:

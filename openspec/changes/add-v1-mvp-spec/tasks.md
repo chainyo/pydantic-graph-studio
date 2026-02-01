@@ -1,5 +1,5 @@
 ## 1. Implementation
-- [ ] 1.1 Define JSON schemas for graph and event payloads
+- [x] 1.1 Define JSON schemas for graph and event payloads
 - [ ] 1.2 Implement graph introspection model and serializer
 - [ ] 1.3 Add runtime instrumentation for sync and async nodes
 - [ ] 1.4 Emit ordered event streams with run identifiers
