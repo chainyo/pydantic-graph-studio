@@ -1,5 +1,6 @@
 """Pydantic Graph Studio entrypoint."""
 
+from pydantic_graph_studio.introspection import build_graph_model, serialize_graph
 from pydantic_graph_studio.schemas import (
     EdgeTakenEvent,
     ErrorEvent,
@@ -27,10 +28,12 @@ __all__ = [
     "NodeEndEvent",
     "NodeStartEvent",
     "RunEndEvent",
+    "build_graph_model",
     "event_schema",
     "export_schemas",
     "graph_schema",
     "main",
+    "serialize_graph",
 ]
 
 

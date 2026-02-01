@@ -1,6 +1,6 @@
 ## 1. Implementation
 - [x] 1.1 Define JSON schemas for graph and event payloads
-- [ ] 1.2 Implement graph introspection model and serializer
+- [x] 1.2 Implement graph introspection model and serializer
 - [ ] 1.3 Add runtime instrumentation for sync and async nodes
 - [ ] 1.4 Emit ordered event streams with run identifiers
 - [ ] 1.5 Implement HTTP server routes (`/api/graph`, `/api/run`, `/api/events`)
