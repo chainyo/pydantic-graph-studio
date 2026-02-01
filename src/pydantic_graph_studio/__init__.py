@@ -1,5 +1,6 @@
 """Pydantic Graph Studio entrypoint."""
 
+from pydantic_graph_studio.cli import main
 from pydantic_graph_studio.introspection import build_graph_model, serialize_graph
 from pydantic_graph_studio.runtime import (
     RunHooks,
@@ -52,9 +53,3 @@ __all__ = [
     "run_instrumented_sync",
     "serialize_graph",
 ]
-
-
-def main() -> None:
-    """CLI entrypoint placeholder."""
-
-    print("pydantic-graph-studio is not implemented yet.")

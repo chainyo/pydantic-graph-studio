@@ -5,6 +5,6 @@
 - [x] 1.4 Emit ordered event streams with run identifiers
 - [x] 1.5 Implement HTTP server routes (`/api/graph`, `/api/run`, `/api/events`)
 - [x] 1.6 Bundle and serve static UI assets from the Python package
-- [ ] 1.7 Implement `pgraph` CLI with module and file locators
+- [x] 1.7 Implement `pgraph` CLI with module and file locators
 - [ ] 1.8 Add unit tests for introspection and event ordering
 - [ ] 1.9 Add integration test for server startup and SSE

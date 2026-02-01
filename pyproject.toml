@@ -20,6 +20,7 @@ classifiers = [
 dependencies = [
     "fastapi>=0.110.0",
     "pydantic-graph>=1.50.0",
+    "uvicorn>=0.29.0",
 ]
 
 [dependency-groups]
@@ -31,6 +32,7 @@ dev = [
 
 [project.scripts]
 pydantic-graph-studio = "pydantic_graph_studio:main"
+pgraph = "pydantic_graph_studio:main"
 
 [tool.ruff]
 line-length = 120
