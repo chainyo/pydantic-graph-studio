@@ -5,6 +5,7 @@ from pydantic_graph_studio.runtime import (
     RunHooks,
     instrument_graph_run,
     iter_instrumented,
+    iter_run_events,
     run_instrumented,
     run_instrumented_sync,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "graph_schema",
     "instrument_graph_run",
     "iter_instrumented",
+    "iter_run_events",
     "main",
     "run_instrumented",
     "run_instrumented_sync",

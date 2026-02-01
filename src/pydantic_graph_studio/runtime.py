@@ -6,14 +6,23 @@ import asyncio
 import inspect
 import types
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from pydantic_graph import Graph
 from pydantic_graph.graph import GraphRun, GraphRunResult
 from pydantic_graph.nodes import BaseNode, End
 
+from pydantic_graph_studio.schemas import (
+    EdgeTakenEvent,
+    ErrorEvent,
+    Event,
+    NodeEndEvent,
+    NodeStartEvent,
+    RunEndEvent,
+)
 HookReturn = Awaitable[None] | None
 NodeStartHook = Callable[[GraphRun[Any, Any, Any], BaseNode[Any, Any, Any]], HookReturn]
 NodeEndHook = Callable[
@@ -132,6 +141,134 @@ async def run_instrumented(
         result = graph_run.result
         assert result is not None, "GraphRun should have a result"
         return result
+
+
+async def iter_run_events(
+    graph: Graph[Any, Any, Any],
+    start_node: BaseNode[Any, Any, Any],
+    *,
+    state: Any = None,
+    deps: Any = None,
+    persistence: Any = None,
+) -> AsyncIterator[Event]:
+    """Yield an ordered stream of runtime events for a graph run."""
+
+    run_id = uuid4().hex
+    queue: asyncio.Queue[Event] = asyncio.Queue()
+    done = asyncio.Event()
+
+    async def emit(event: Event) -> None:
+        await queue.put(event)
+
+    async def on_node_start(
+        _run: GraphRun[Any, Any, Any],
+        node: BaseNode[Any, Any, Any],
+    ) -> None:
+        await emit(
+            NodeStartEvent(
+                run_id=run_id,
+                event_type="node_start",
+                node_id=node.get_node_id(),
+            )
+        )
+
+    async def on_node_end(
+        _run: GraphRun[Any, Any, Any],
+        node: BaseNode[Any, Any, Any],
+        _result: BaseNode[Any, Any, Any] | End[Any],
+    ) -> None:
+        await emit(
+            NodeEndEvent(
+                run_id=run_id,
+                event_type="node_end",
+                node_id=node.get_node_id(),
+            )
+        )
+
+    async def on_edge_taken(
+        _run: GraphRun[Any, Any, Any],
+        source: BaseNode[Any, Any, Any],
+        target: BaseNode[Any, Any, Any],
+    ) -> None:
+        await emit(
+            EdgeTakenEvent(
+                run_id=run_id,
+                event_type="edge_taken",
+                source_node_id=source.get_node_id(),
+                target_node_id=target.get_node_id(),
+            )
+        )
+
+    async def on_run_end(
+        _run: GraphRun[Any, Any, Any],
+        _end: End[Any],
+    ) -> None:
+        await emit(
+            RunEndEvent(
+                run_id=run_id,
+                event_type="run_end",
+            )
+        )
+        done.set()
+
+    async def on_error(
+        _run: GraphRun[Any, Any, Any],
+        node: BaseNode[Any, Any, Any],
+        exc: BaseException,
+    ) -> None:
+        await emit(
+            ErrorEvent(
+                run_id=run_id,
+                event_type="error",
+                message=str(exc),
+                node_id=node.get_node_id(),
+            )
+        )
+        done.set()
+
+    hooks = RunHooks(
+        on_node_start=on_node_start,
+        on_node_end=on_node_end,
+        on_edge_taken=on_edge_taken,
+        on_run_end=on_run_end,
+        on_error=on_error,
+    )
+
+    async def _run() -> None:
+        try:
+            await run_instrumented(
+                graph,
+                start_node,
+                state=state,
+                deps=deps,
+                persistence=persistence,
+                hooks=hooks,
+            )
+        except BaseException as exc:
+            if not done.is_set():
+                await emit(
+                    ErrorEvent(
+                        run_id=run_id,
+                        event_type="error",
+                        message=str(exc),
+                        node_id=None,
+                    )
+                )
+        finally:
+            done.set()
+
+    task = asyncio.create_task(_run())
+    try:
+        while True:
+            if done.is_set() and queue.empty():
+                break
+            event = await queue.get()
+            yield event
+    finally:
+        if not task.done():
+            task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 def run_instrumented_sync(
