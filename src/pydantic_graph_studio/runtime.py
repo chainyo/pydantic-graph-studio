@@ -23,6 +23,7 @@ from pydantic_graph_studio.schemas import (
     NodeStartEvent,
     RunEndEvent,
 )
+
 HookReturn = Awaitable[None] | None
 NodeStartHook = Callable[[GraphRun[Any, Any, Any], BaseNode[Any, Any, Any]], HookReturn]
 NodeEndHook = Callable[
@@ -60,13 +61,13 @@ def instrument_graph_run(graph_run: GraphRun[Any, Any, Any], hooks: RunHooks) ->
     """Attach runtime hooks to a GraphRun instance."""
 
     if getattr(graph_run, "_pgraph_instrumented", False):
-        setattr(graph_run, "_pgraph_run_hooks", hooks)
+        setattr(graph_run, "_pgraph_run_hooks", hooks)  # noqa: B010
         return graph_run
 
     original_next = graph_run.next
-    setattr(graph_run, "_pgraph_instrumented", True)
-    setattr(graph_run, "_pgraph_run_hooks", hooks)
-    setattr(graph_run, "_pgraph_original_next", original_next)
+    setattr(graph_run, "_pgraph_instrumented", True)  # noqa: B010
+    setattr(graph_run, "_pgraph_run_hooks", hooks)  # noqa: B010
+    setattr(graph_run, "_pgraph_original_next", original_next)  # noqa: B010
 
     async def _instrumented_next(
         self: GraphRun[Any, Any, Any],
@@ -96,7 +97,7 @@ def instrument_graph_run(graph_run: GraphRun[Any, Any, Any], hooks: RunHooks) ->
 
         return result
 
-    graph_run.next = types.MethodType(_instrumented_next, graph_run)
+    setattr(graph_run, "next", types.MethodType(_instrumented_next, graph_run))  # noqa: B010
     return graph_run
 
 
@@ -150,10 +151,12 @@ async def iter_run_events(
     state: Any = None,
     deps: Any = None,
     persistence: Any = None,
+    run_id: str | None = None,
 ) -> AsyncIterator[Event]:
     """Yield an ordered stream of runtime events for a graph run."""
 
-    run_id = uuid4().hex
+    if run_id is None:
+        run_id = uuid4().hex
     queue: asyncio.Queue[Event] = asyncio.Queue()
     done = asyncio.Event()
 

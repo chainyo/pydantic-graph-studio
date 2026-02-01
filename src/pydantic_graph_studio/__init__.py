@@ -24,6 +24,7 @@ from pydantic_graph_studio.schemas import (
     export_schemas,
     graph_schema,
 )
+from pydantic_graph_studio.server import RunRegistry, create_app
 
 __all__ = [
     "EdgeTakenEvent",
@@ -37,7 +38,9 @@ __all__ = [
     "NodeStartEvent",
     "RunEndEvent",
     "RunHooks",
+    "RunRegistry",
     "build_graph_model",
+    "create_app",
     "event_schema",
     "export_schemas",
     "graph_schema",
