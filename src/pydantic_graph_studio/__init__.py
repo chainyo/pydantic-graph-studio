@@ -1,6 +1,13 @@
 """Pydantic Graph Studio entrypoint."""
 
 from pydantic_graph_studio.introspection import build_graph_model, serialize_graph
+from pydantic_graph_studio.runtime import (
+    RunHooks,
+    instrument_graph_run,
+    iter_instrumented,
+    run_instrumented,
+    run_instrumented_sync,
+)
 from pydantic_graph_studio.schemas import (
     EdgeTakenEvent,
     ErrorEvent,
@@ -28,11 +35,16 @@ __all__ = [
     "NodeEndEvent",
     "NodeStartEvent",
     "RunEndEvent",
+    "RunHooks",
     "build_graph_model",
     "event_schema",
     "export_schemas",
     "graph_schema",
+    "instrument_graph_run",
+    "iter_instrumented",
     "main",
+    "run_instrumented",
+    "run_instrumented_sync",
     "serialize_graph",
 ]
 
