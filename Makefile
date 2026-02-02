@@ -10,6 +10,6 @@ typecheck:
 	uv run ty check .
 
 test:
-	uv run pytest tests
+	uv run pytest tests --cov=pydantic_graph_studio --cov-report=term-missing
 
 check: fmt lint typecheck test
