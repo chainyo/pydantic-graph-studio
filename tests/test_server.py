@@ -47,6 +47,9 @@ def test_start_run_and_stream_events() -> None:
         events: list[dict[str, object]] = []
         with client.stream("GET", f"/api/events?run_id={run_id}") as response:
             assert response.status_code == 200
+            content_type = response.headers.get("content-type", "")
+            assert content_type.startswith("text/event-stream")
+            assert response.headers.get("cache-control") == "no-cache"
             for line in response.iter_lines():
                 if not line:
                     continue
