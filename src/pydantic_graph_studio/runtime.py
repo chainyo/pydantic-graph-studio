@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import types
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
@@ -23,6 +23,15 @@ from pydantic_graph_studio.schemas import (
     NodeStartEvent,
     RunEndEvent,
 )
+
+try:  # pragma: no cover - optional beta support
+    from pydantic_graph.beta.graph import EndMarker as BetaEndMarker
+    from pydantic_graph.beta.graph import Graph as BetaGraph
+    from pydantic_graph.beta.graph import JoinItem as BetaJoinItem
+except ModuleNotFoundError:  # pragma: no cover
+    BetaGraph = None
+    BetaEndMarker = object
+    BetaJoinItem = object
 
 HookReturn = Awaitable[None] | None
 NodeStartHook = Callable[[GraphRun[Any, Any, Any], BaseNode[Any, Any, Any]], HookReturn]
@@ -146,14 +155,29 @@ async def run_instrumented(
 
 async def iter_run_events(
     graph: Graph[Any, Any, Any],
-    start_node: BaseNode[Any, Any, Any],
+    start_node: BaseNode[Any, Any, Any] | None = None,
     *,
     state: Any = None,
     deps: Any = None,
     persistence: Any = None,
+    inputs: Any = None,
     run_id: str | None = None,
 ) -> AsyncIterator[Event]:
     """Yield an ordered stream of runtime events for a graph run."""
+
+    if _is_beta_graph(graph):
+        async for event in _iter_run_events_beta(
+            graph,
+            state=state,
+            deps=deps,
+            inputs=inputs,
+            run_id=run_id,
+        ):
+            yield event
+        return
+
+    if start_node is None:
+        raise ValueError("start_node is required for v1 graphs")
 
     if run_id is None:
         run_id = uuid4().hex
@@ -247,6 +271,104 @@ async def iter_run_events(
                 persistence=persistence,
                 hooks=hooks,
             )
+        except BaseException as exc:
+            if not done.is_set():
+                await emit(
+                    ErrorEvent(
+                        run_id=run_id,
+                        event_type="error",
+                        message=str(exc),
+                        node_id=None,
+                    )
+                )
+        finally:
+            done.set()
+
+    task = asyncio.create_task(_run())
+    try:
+        while True:
+            if done.is_set() and queue.empty():
+                break
+            event = await queue.get()
+            yield event
+    finally:
+        if not task.done():
+            task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+def _is_beta_graph(graph: Any) -> bool:
+    return BetaGraph is not None and isinstance(graph, BetaGraph)
+
+
+async def _iter_run_events_beta(
+    graph: Any,
+    *,
+    state: Any = None,
+    deps: Any = None,
+    inputs: Any = None,
+    run_id: str | None = None,
+) -> AsyncIterator[Event]:
+    if run_id is None:
+        run_id = uuid4().hex
+    queue: asyncio.Queue[Event] = asyncio.Queue()
+    done = asyncio.Event()
+
+    async def emit(event: Event) -> None:
+        await queue.put(event)
+
+    async def _run() -> None:
+        try:
+            async with graph.iter(state=state, deps=deps, inputs=inputs, infer_name=True) as graph_run:
+                iterator = graph_run._iterator_instance
+                original_run_task = iterator._run_task
+
+                async def instrumented_run_task(task: Any) -> Any:
+                    node_id = str(task.node_id)
+                    await emit(NodeStartEvent(run_id=run_id, event_type="node_start", node_id=node_id))
+                    try:
+                        result = await original_run_task(task)
+                    except BaseException as exc:
+                        await emit(
+                            ErrorEvent(
+                                run_id=run_id,
+                                event_type="error",
+                                message=str(exc),
+                                node_id=node_id,
+                            )
+                        )
+                        raise
+                    await emit(NodeEndEvent(run_id=run_id, event_type="node_end", node_id=node_id))
+
+                    if isinstance(result, BetaEndMarker):
+                        await emit(RunEndEvent(run_id=run_id, event_type="run_end"))
+                        done.set()
+                    elif isinstance(result, BetaJoinItem):
+                        await emit(
+                            EdgeTakenEvent(
+                                run_id=run_id,
+                                event_type="edge_taken",
+                                source_node_id=node_id,
+                                target_node_id=str(result.join_id),
+                            )
+                        )
+                    elif isinstance(result, Sequence):
+                        for new_task in result:
+                            await emit(
+                                EdgeTakenEvent(
+                                    run_id=run_id,
+                                    event_type="edge_taken",
+                                    source_node_id=node_id,
+                                    target_node_id=str(new_task.node_id),
+                                )
+                            )
+                    return result
+
+                iterator._run_task = instrumented_run_task  # type: ignore[assignment]
+
+                async for _item in graph_run:
+                    pass
         except BaseException as exc:
             if not done.is_set():
                 await emit(

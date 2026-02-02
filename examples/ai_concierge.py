@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import os
-from dataclasses import dataclass, field
+from typing import Literal
 
-from pydantic_graph import BaseNode, End, Graph, GraphRunContext
+from pydantic_graph.beta.graph_builder import GraphBuilder
+from pydantic_graph.beta.join import reduce_dict_update
+from pydantic_graph.beta.step import StepContext
 
 
 def _flag(name: str, default: bool = False) -> bool:
@@ -14,128 +16,99 @@ def _flag(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-@dataclass
-class FetchBundle:
-    results: dict[str, str] = field(default_factory=dict)
-    notes: list[str] = field(default_factory=list)
+builder: GraphBuilder[None, None, None, str] = GraphBuilder()
 
 
-async def _fetch_questionnaire() -> str:
+@builder.step(node_id="ResultsGate", label="Results Gate")
+async def results_gate(ctx: StepContext[None, None, None]) -> bool:
+    await asyncio.sleep(0.15)
+    return _flag("CONCIERGE_RESULTS_AVAILABLE", default=True)
+
+
+@builder.step(node_id="ThreadGate", label="Thread Gate")
+async def thread_gate(ctx: StepContext[None, None, None]) -> bool:
+    await asyncio.sleep(0.15)
+    return _flag("CONCIERGE_THREAD_LOCKED", default=False)
+
+
+@builder.step(node_id="Escalate", label="Escalate")
+async def escalate(ctx: StepContext[None, None, bool]) -> str:
+    await asyncio.sleep(0.2)
+    return "Escalated: lock thread and alert clinician"
+
+
+@builder.step(node_id="PlannerLLM", label="Planner LLM")
+async def planner(ctx: StepContext[None, None, bool]) -> None:
+    await asyncio.sleep(0.2)
+    return None
+
+
+@builder.step(node_id="FetchQuestionnaire", label="Fetch Questionnaire")
+async def fetch_questionnaire(ctx: StepContext[None, None, None]) -> dict[str, str]:
     await asyncio.sleep(0.35)
-    return "questionnaire: completed"
+    return {"questionnaire": "completed"}
 
 
-async def _fetch_biomarkers() -> str:
+@builder.step(node_id="FetchBiomarkers", label="Fetch Biomarkers")
+async def fetch_biomarkers(ctx: StepContext[None, None, None]) -> dict[str, str]:
     await asyncio.sleep(0.4)
-    return "biomarkers: refreshed"
+    return {"biomarkers": "refreshed"}
 
 
-async def _fetch_transcript() -> str:
+@builder.step(node_id="FetchTranscript", label="Fetch Transcript")
+async def fetch_transcript(ctx: StepContext[None, None, None]) -> dict[str, str]:
     await asyncio.sleep(0.45)
-    return "transcript: indexed"
+    return {"transcript": "indexed"}
 
 
-async def _fetch_all() -> FetchBundle:
-    questionnaire, biomarkers, transcript = await asyncio.gather(
-        _fetch_questionnaire(),
-        _fetch_biomarkers(),
-        _fetch_transcript(),
+@builder.step(node_id="AnswerLLM", label="Answer LLM")
+async def answer_llm(ctx: StepContext[None, None, dict[str, str]]) -> str:
+    await asyncio.sleep(0.2)
+    summary = ", ".join(sorted(ctx.inputs.keys()))
+    return f"answer drafted from {summary}"
+
+
+@builder.step(node_id="AttributionValidation", label="Attribution Validation")
+async def attribution_validation(ctx: StepContext[None, None, str]) -> str:
+    await asyncio.sleep(0.2)
+    return ctx.inputs
+
+
+results_decision = builder.decision(node_id="ResultsDecision", note="Results available?")
+results_decision = results_decision.branch(builder.match(Literal[True]).to(thread_gate))
+results_decision = results_decision.branch(builder.match(Literal[False]).to(escalate))
+
+thread_decision = builder.decision(node_id="ThreadDecision", note="Thread locked?")
+thread_decision = thread_decision.branch(builder.match(Literal[True]).to(escalate))
+thread_decision = thread_decision.branch(builder.match(Literal[False]).to(planner))
+
+fetch_join = builder.join(
+    reduce_dict_update,
+    initial_factory=dict,
+    node_id="FetchJoin",
+)
+
+builder.add(builder.edge_from(builder.start_node).to(results_gate))
+builder.add(builder.edge_from(results_gate).to(results_decision))
+builder.add(builder.edge_from(thread_gate).to(thread_decision))
+builder.add_edge(escalate, builder.end_node)
+
+builder.add(
+    builder.edge_from(planner).broadcast(
+        lambda edge: [
+            edge.to(fetch_questionnaire),
+            edge.to(fetch_biomarkers),
+            edge.to(fetch_transcript),
+        ],
+        fork_id="FetchFork",
     )
-    bundle = FetchBundle(
-        results={
-            "questionnaire": questionnaire,
-            "biomarkers": biomarkers,
-            "transcript": transcript,
-        },
-        notes=[questionnaire, biomarkers, transcript],
-    )
-    return bundle
+)
 
+builder.add_edge(fetch_questionnaire, fetch_join)
+builder.add_edge(fetch_biomarkers, fetch_join)
+builder.add_edge(fetch_transcript, fetch_join)
+builder.add_edge(fetch_join, answer_llm)
+builder.add_edge(answer_llm, attribution_validation)
+builder.add_edge(attribution_validation, builder.end_node)
 
-@dataclass
-class Start(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> "ResultsGate":
-        await asyncio.sleep(0.15)
-        return ResultsGate()
-
-
-@dataclass
-class ResultsGate(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> "ThreadGate | Escalate":
-        await asyncio.sleep(0.2)
-        results_available = _flag("CONCIERGE_RESULTS_AVAILABLE", default=True)
-        if results_available:
-            return ThreadGate()
-        return Escalate()
-
-
-@dataclass
-class ThreadGate(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> "Escalate | PlannerLLM":
-        await asyncio.sleep(0.2)
-        thread_locked = _flag("CONCIERGE_THREAD_LOCKED", default=False)
-        if thread_locked:
-            return Escalate()
-        return PlannerLLM()
-
-
-@dataclass
-class Escalate(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> "Done":
-        await asyncio.sleep(0.2)
-        return Done(reason="Escalated: lock thread and alert clinician")
-
-
-@dataclass
-class PlannerLLM(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> "FetchAll":
-        await asyncio.sleep(0.25)
-        return FetchAll()
-
-
-@dataclass
-class FetchAll(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> "AnswerLLM":
-        bundle = await _fetch_all()
-        return AnswerLLM(bundle=bundle)
-
-
-@dataclass
-class AnswerLLM(BaseNode[None, None, str]):
-    bundle: FetchBundle
-
-    async def run(self, ctx: GraphRunContext) -> "AttributionValidation":
-        await asyncio.sleep(0.2)
-        if self.bundle.results:
-            summary = ", ".join(self.bundle.results.values())
-            self.bundle.notes.append(f"answer: drafted with {summary}")
-        return AttributionValidation()
-
-
-@dataclass
-class AttributionValidation(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> "Done":
-        await asyncio.sleep(0.2)
-        return Done(reason="Response ready with attributions")
-
-
-@dataclass
-class Done(BaseNode[None, None, str]):
-    reason: str = "Completed"
-
-    async def run(self, ctx: GraphRunContext) -> End[str]:
-        await asyncio.sleep(0.1)
-        return End(self.reason)
-
-
-graph = Graph(nodes=[
-    Start,
-    ResultsGate,
-    ThreadGate,
-    Escalate,
-    PlannerLLM,
-    FetchAll,
-    AnswerLLM,
-    AttributionValidation,
-    Done,
-])
+graph = builder.build()

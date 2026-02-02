@@ -16,6 +16,10 @@ from pydantic_graph.nodes import BaseNode
 from pydantic_graph_studio.introspection import build_graph_model
 from pydantic_graph_studio.server import create_app
 
+try:  # pragma: no cover - optional beta support
+    from pydantic_graph.beta.graph import Graph as BetaGraph
+except ModuleNotFoundError:  # pragma: no cover
+    BetaGraph = None
 
 @dataclass(slots=True)
 class GraphRef:
@@ -67,11 +71,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _load_graph(graph_ref: str) -> Graph[Any, Any, Any]:
+def _load_graph(graph_ref: str) -> Any:
     parsed = _parse_graph_ref(graph_ref)
     module = _load_module(parsed.target)
     graph = _resolve_attribute(module, parsed.attribute)
-    if not isinstance(graph, Graph):
+    if not isinstance(graph, Graph) and not _is_beta_graph(graph):
         raise CLIError(
             "Graph reference did not resolve to a Graph instance. "
             "Ensure the reference points to a pydantic_graph.Graph object."
@@ -127,9 +131,14 @@ def _resolve_attribute(module: Any, attribute: str) -> Any:
 
 
 def _resolve_start_node(
-    graph: Graph[Any, Any, Any],
+    graph: Any,
     start_node_id: str | None,
-) -> BaseNode[Any, Any, Any]:
+) -> BaseNode[Any, Any, Any] | None:
+    if _is_beta_graph(graph):
+        if start_node_id:
+            raise CLIError("Beta graphs use a fixed start node; --start is not supported.")
+        return None
+
     node_defs = graph.node_defs
     if not node_defs:
         raise CLIError("Graph contains no nodes")
@@ -165,8 +174,8 @@ def _resolve_start_node(
 
 
 def _run_server(
-    graph: Graph[Any, Any, Any],
-    start_node: BaseNode[Any, Any, Any],
+    graph: Any,
+    start_node: BaseNode[Any, Any, Any] | None,
     *,
     host: str,
     port: int,
@@ -182,3 +191,7 @@ def _run_server(
 
     print(f"Studio running at http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def _is_beta_graph(graph: Any) -> bool:
+    return BetaGraph is not None and isinstance(graph, BetaGraph)

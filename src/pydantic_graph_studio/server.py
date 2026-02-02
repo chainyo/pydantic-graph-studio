@@ -37,11 +37,12 @@ class RunRegistry:
     async def start_run(
         self,
         graph: Graph[Any, Any, Any],
-        start_node: BaseNode[Any, Any, Any],
+        start_node: BaseNode[Any, Any, Any] | None,
         *,
         state: Any = None,
         deps: Any = None,
         persistence: Any = None,
+        inputs: Any = None,
     ) -> str:
         """Start a graph run and return the run id."""
         run_id = uuid4().hex
@@ -56,6 +57,7 @@ class RunRegistry:
                     state=state,
                     deps=deps,
                     persistence=persistence,
+                    inputs=inputs,
                     run_id=run_id,
                 ):
                     await queue.put(event)
@@ -89,11 +91,12 @@ class RunRegistry:
 
 def create_app(
     graph: Graph[Any, Any, Any],
-    start_node: BaseNode[Any, Any, Any],
+    start_node: BaseNode[Any, Any, Any] | None,
     *,
     state: Any = None,
     deps: Any = None,
     persistence: Any = None,
+    inputs: Any = None,
 ) -> FastAPI:
     """Create the FastAPI app bound to a graph and start node."""
     ui_root = resources.files("pydantic_graph_studio.ui")
@@ -109,6 +112,7 @@ def create_app(
         app.state.state = state
         app.state.deps = deps
         app.state.persistence = persistence
+        app.state.inputs = inputs
         app.state.registry = registry
         try:
             yield
@@ -132,6 +136,7 @@ def create_app(
             state=app.state.state,
             deps=app.state.deps,
             persistence=app.state.persistence,
+            inputs=app.state.inputs,
         )
         return {"run_id": run_id}
 

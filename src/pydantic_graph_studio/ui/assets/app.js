@@ -91,6 +91,7 @@
       sourcePosition,
       targetPosition,
       borderRadius: 18,
+      centerX: typeof data?.routeX === "number" ? data.routeX : undefined,
     });
     const mergedStyle = {
       ...edgeBaseStyle,
@@ -107,41 +108,48 @@
     const edges = [];
     const positions = new Map();
     const dynamicNodesBySource = new Map();
-    const gapX = 240;
-    const gapY = 180;
+    const terminalSet = new Set(graph.terminal_nodes || []);
+    const gapX = 260;
+    const gapY = 190;
+    const nodeWidth = 160;
     const nodeOrder = graph.nodes.map((node) => node.node_id);
     const nodeById = new Map(graph.nodes.map((node) => [node.node_id, node]));
     const adjacency = new Map();
+    const incoming = new Map();
     nodeOrder.forEach((nodeId) => adjacency.set(nodeId, []));
+    nodeOrder.forEach((nodeId) => incoming.set(nodeId, []));
     graph.edges.forEach((edge) => {
       if (!edge.target_node_id) return;
       if (!adjacency.has(edge.source_node_id)) {
         adjacency.set(edge.source_node_id, []);
       }
+      if (!incoming.has(edge.target_node_id)) {
+        incoming.set(edge.target_node_id, []);
+      }
       adjacency.get(edge.source_node_id).push(edge.target_node_id);
+      incoming.get(edge.target_node_id).push(edge.source_node_id);
     });
 
     const levels = new Map();
-    const queue = [];
-    graph.entry_nodes.forEach((nodeId) => {
+    const entryNodes = graph.entry_nodes.length ? graph.entry_nodes : nodeOrder.slice(0, 1);
+    entryNodes.forEach((nodeId) => {
       levels.set(nodeId, 0);
-      queue.push(nodeId);
     });
-    if (queue.length === 0 && nodeOrder.length) {
-      levels.set(nodeOrder[0], 0);
-      queue.push(nodeOrder[0]);
-    }
-    while (queue.length) {
-      const current = queue.shift();
-      const currentLevel = levels.get(current) ?? 0;
-      const nextNodes = adjacency.get(current) || [];
-      nextNodes.forEach((target) => {
-        const nextLevel = currentLevel + 1;
-        if (!levels.has(target) || levels.get(target) > nextLevel) {
-          levels.set(target, nextLevel);
-          queue.push(target);
+    const maxIterations = Math.max(nodeOrder.length * 2, 1);
+    for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+      let updated = false;
+      graph.edges.forEach((edge) => {
+        if (!edge.target_node_id) return;
+        const sourceLevel = levels.get(edge.source_node_id);
+        if (sourceLevel === undefined) return;
+        const candidate = sourceLevel + 1;
+        const current = levels.get(edge.target_node_id);
+        if (current === undefined || current < candidate) {
+          levels.set(edge.target_node_id, Math.min(candidate, nodeOrder.length));
+          updated = true;
         }
       });
+      if (!updated) break;
     }
 
     let maxLevel = 0;
@@ -155,6 +163,31 @@
         levels.set(nodeId, maxLevel + 1);
       }
     });
+    let maxNonTerminalLevel = -1;
+    nodeOrder.forEach((nodeId) => {
+      if (terminalSet.has(nodeId)) return;
+      const level = levels.get(nodeId) ?? 0;
+      if (level > maxNonTerminalLevel) {
+        maxNonTerminalLevel = level;
+      }
+    });
+    if (maxNonTerminalLevel < 0) {
+      maxNonTerminalLevel = maxLevel;
+    }
+    terminalSet.forEach((nodeId) => {
+      levels.set(nodeId, maxNonTerminalLevel + 1);
+    });
+    if (maxNonTerminalLevel >= 0) {
+      nodeOrder.forEach((nodeId) => {
+        if (terminalSet.has(nodeId)) return;
+        const targets = adjacency.get(nodeId) || [];
+        if (targets.length === 0) return;
+        const allTerminal = targets.every((target) => terminalSet.has(target));
+        if (allTerminal) {
+          levels.set(nodeId, Math.max(levels.get(nodeId) ?? 0, maxNonTerminalLevel));
+        }
+      });
+    }
 
     const columns = new Map();
     nodeOrder.forEach((nodeId) => {
@@ -166,15 +199,61 @@
     });
 
     const orderedLevels = Array.from(columns.keys()).sort((a, b) => a - b);
-    const maxRowSize = Math.max(...Array.from(columns.values()).map((list) => list.length), 1);
+    const labelFor = (nodeId) => nodeById.get(nodeId)?.label || nodeId;
+    const layers = orderedLevels.map((level) => columns.get(level).slice());
+    layers.forEach((layer) => layer.sort((a, b) => labelFor(a).localeCompare(labelFor(b))));
+
+    const nodeIndex = new Map();
+    const refreshIndex = () => {
+      layers.forEach((layer) => {
+        layer.forEach((nodeId, index) => {
+          nodeIndex.set(nodeId, index);
+        });
+      });
+    };
+    const barycenterSort = (layerIndex, useIncoming) => {
+      const layer = layers[layerIndex];
+      const scores = new Map();
+      layer.forEach((nodeId, index) => {
+        const neighbors = useIncoming ? incoming.get(nodeId) : adjacency.get(nodeId);
+        const indices = (neighbors || [])
+          .map((neighbor) => nodeIndex.get(neighbor))
+          .filter((value) => value !== undefined);
+        const score = indices.length
+          ? indices.reduce((sum, value) => sum + value, 0) / indices.length
+          : index;
+        scores.set(nodeId, score);
+      });
+      layer.sort((a, b) => {
+        const diff = (scores.get(a) ?? 0) - (scores.get(b) ?? 0);
+        if (Math.abs(diff) > 0.0001) {
+          return diff;
+        }
+        return labelFor(a).localeCompare(labelFor(b));
+      });
+    };
+
+    refreshIndex();
+    for (let pass = 0; pass < 3; pass += 1) {
+      for (let i = 1; i < layers.length; i += 1) {
+        barycenterSort(i, true);
+        refreshIndex();
+      }
+      for (let i = layers.length - 2; i >= 0; i -= 1) {
+        barycenterSort(i, false);
+        refreshIndex();
+      }
+    }
+
+    const maxRowSize = Math.max(...layers.map((list) => list.length), 1);
+    const rowBounds = new Map();
+    let globalMinX = Infinity;
+    let globalMaxX = -Infinity;
 
     orderedLevels.forEach((level, rowIndex) => {
-      const rowNodes = columns.get(level).slice();
-      rowNodes.sort((a, b) => {
-        const labelA = nodeById.get(a)?.label || a;
-        const labelB = nodeById.get(b)?.label || b;
-        return labelA.localeCompare(labelB);
-      });
+      const rowNodes = layers[rowIndex] || columns.get(level).slice();
+      let minX = Infinity;
+      let maxX = -Infinity;
       const rowWidth = (rowNodes.length - 1) * gapX;
       const centerOffset = ((maxRowSize - 1) * gapX - rowWidth) / 2;
       rowNodes.forEach((nodeId, columnIndex) => {
@@ -183,6 +262,10 @@
           y: rowIndex * gapY,
         };
         positions.set(nodeId, position);
+        minX = Math.min(minX, position.x);
+        maxX = Math.max(maxX, position.x);
+        globalMinX = Math.min(globalMinX, position.x);
+        globalMaxX = Math.max(globalMaxX, position.x);
         const node = nodeById.get(nodeId);
         nodes.push({
           id: nodeId,
@@ -199,7 +282,21 @@
           },
         });
       });
+      if (rowNodes.length) {
+        rowBounds.set(level, {
+          minX: minX - nodeWidth / 2,
+          maxX: maxX + nodeWidth / 2,
+        });
+      }
     });
+    if (!Number.isFinite(globalMinX) || !Number.isFinite(globalMaxX)) {
+      globalMinX = 0;
+      globalMaxX = 0;
+    }
+    const sideLaneOffset = gapX * 1.1;
+    const sideLaneSpacing = gapX * 0.35;
+    let leftLaneCount = 0;
+    let rightLaneCount = 0;
 
     graph.edges.forEach((edge, index) => {
       let target = edge.target_node_id;
@@ -227,6 +324,40 @@
         target = dynamicId;
       }
 
+      let routeX;
+      const sourceLevel = levels.get(edge.source_node_id) ?? 0;
+      const targetLevel = levels.get(target) ?? 0;
+      if (Math.abs(targetLevel - sourceLevel) > 1) {
+        const sourcePos = positions.get(edge.source_node_id);
+        const targetPos = positions.get(target);
+        if (sourcePos && targetPos) {
+          const defaultCenter = (sourcePos.x + targetPos.x) / 2;
+          let needsDetour = false;
+          for (
+            let level = Math.min(sourceLevel, targetLevel) + 1;
+            level <= Math.max(sourceLevel, targetLevel) - 1;
+            level += 1
+          ) {
+            const bounds = rowBounds.get(level);
+            if (!bounds) continue;
+            if (defaultCenter >= bounds.minX && defaultCenter <= bounds.maxX) {
+              needsDetour = true;
+              break;
+            }
+          }
+          if (needsDetour) {
+            const useRight = sourcePos.x >= targetPos.x;
+            if (useRight) {
+              rightLaneCount += 1;
+              routeX = globalMaxX + sideLaneOffset + (rightLaneCount - 1) * sideLaneSpacing;
+            } else {
+              leftLaneCount += 1;
+              routeX = globalMinX - sideLaneOffset - (leftLaneCount - 1) * sideLaneSpacing;
+            }
+          }
+        }
+      }
+
       edges.push({
         id: `e-${edge.source_node_id}-${target}-${index}`,
         source: edge.source_node_id,
@@ -239,6 +370,7 @@
         },
         data: {
           dynamic: edge.dynamic,
+          routeX,
         },
       });
     });
