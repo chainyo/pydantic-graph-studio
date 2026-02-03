@@ -10,7 +10,7 @@ MAX_STEPS = 4
 
 @dataclass
 class Start(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> "Work":
+    async def run(self, ctx: GraphRunContext) -> Work:
         await asyncio.sleep(0.2)
         return Work(step=1)
 
@@ -19,7 +19,7 @@ class Start(BaseNode[None, None, str]):
 class Work(BaseNode[None, None, str]):
     step: int
 
-    async def run(self, ctx: GraphRunContext) -> "OddStep | EvenStep | Done":
+    async def run(self, ctx: GraphRunContext) -> OddStep | EvenStep | Done:
         await asyncio.sleep(0.3)
         if self.step >= MAX_STEPS:
             return Done(message=f"done after {self.step} steps")
@@ -55,4 +55,5 @@ class Done(BaseNode[None, None, str]):
         return End(self.message)
 
 
-graph = Graph(nodes=[Start, Work, OddStep, EvenStep, Done])
+NODE_TYPES: list[type[BaseNode[None, None, str]]] = [Start, Work, OddStep, EvenStep, Done]
+graph: Graph[None, None, str] = Graph[None, None, str](nodes=NODE_TYPES)

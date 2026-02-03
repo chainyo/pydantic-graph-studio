@@ -16,10 +16,14 @@ from pydantic_graph.nodes import BaseNode
 from pydantic_graph_studio.introspection import build_graph_model
 from pydantic_graph_studio.server import create_app
 
+BetaGraph: type[Any] | None = None
 try:  # pragma: no cover - optional beta support
-    from pydantic_graph.beta.graph import Graph as BetaGraph
+    from pydantic_graph.beta.graph import Graph as _BetaGraph
 except ModuleNotFoundError:  # pragma: no cover
-    BetaGraph = None
+    pass
+else:
+    BetaGraph = _BetaGraph
+
 
 @dataclass(slots=True)
 class GraphRef:

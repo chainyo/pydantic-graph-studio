@@ -8,9 +8,10 @@ from pydantic_graph.nodes import NodeDef
 
 from pydantic_graph_studio.schemas import GraphEdge, GraphModel, GraphNode
 
+BetaGraph: type[Any] | None = None
 try:  # pragma: no cover - optional beta support
     from pydantic_graph.beta.decision import Decision as BetaDecision
-    from pydantic_graph.beta.graph import Graph as BetaGraph
+    from pydantic_graph.beta.graph import Graph as _BetaGraph
     from pydantic_graph.beta.join import Join as BetaJoin
     from pydantic_graph.beta.node import EndNode as BetaEndNode
     from pydantic_graph.beta.node import Fork as BetaFork
@@ -20,10 +21,12 @@ try:  # pragma: no cover - optional beta support
     from pydantic_graph.beta.step import NodeStep as BetaNodeStep
     from pydantic_graph.beta.step import Step as BetaStep
 except ModuleNotFoundError:  # pragma: no cover
-    BetaGraph = None
+    pass
+else:
+    BetaGraph = _BetaGraph
 
 
-def build_graph_model(graph: Graph[Any, Any, Any]) -> GraphModel:
+def build_graph_model(graph: Any) -> GraphModel:
     """Build a GraphModel payload from a pydantic_graph.Graph instance."""
 
     if _is_beta_graph(graph):
@@ -151,7 +154,9 @@ def _beta_node_label(node: Any) -> str | None:
     return str(raw) if raw is not None else None
 
 
-def _build_beta_edges(edges_by_source: Mapping[Any, list[Any]], nodes: Mapping[Any, Any] | None = None) -> list[GraphEdge]:
+def _build_beta_edges(
+    edges_by_source: Mapping[Any, list[Any]], nodes: Mapping[Any, Any] | None = None
+) -> list[GraphEdge]:
     edge_pairs: set[tuple[str, str]] = set()
 
     for source_id, paths in edges_by_source.items():

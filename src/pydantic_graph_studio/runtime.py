@@ -24,14 +24,19 @@ from pydantic_graph_studio.schemas import (
     RunEndEvent,
 )
 
+BetaGraph: type[Any] | None = None
+BetaEndMarker: type[Any] = object
+BetaJoinItem: type[Any] = object
 try:  # pragma: no cover - optional beta support
-    from pydantic_graph.beta.graph import EndMarker as BetaEndMarker
-    from pydantic_graph.beta.graph import Graph as BetaGraph
-    from pydantic_graph.beta.graph import JoinItem as BetaJoinItem
+    from pydantic_graph.beta.graph import EndMarker as _BetaEndMarker
+    from pydantic_graph.beta.graph import Graph as _BetaGraph
+    from pydantic_graph.beta.graph import JoinItem as _BetaJoinItem
 except ModuleNotFoundError:  # pragma: no cover
-    BetaGraph = None
-    BetaEndMarker = object
-    BetaJoinItem = object
+    pass
+else:
+    BetaGraph = _BetaGraph
+    BetaEndMarker = _BetaEndMarker
+    BetaJoinItem = _BetaJoinItem
 
 HookReturn = Awaitable[None] | None
 NodeStartHook = Callable[[GraphRun[Any, Any, Any], BaseNode[Any, Any, Any]], HookReturn]
@@ -365,7 +370,7 @@ async def _iter_run_events_beta(
                             )
                     return result
 
-                iterator._run_task = instrumented_run_task  # type: ignore[assignment]
+                iterator._run_task = instrumented_run_task
 
                 async for _item in graph_run:
                     pass

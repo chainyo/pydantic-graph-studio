@@ -60,11 +60,7 @@ def test_beta_iter_run_events_parallel_edges() -> None:
     assert "edge_taken" in event_types
     assert "run_end" in event_types
 
-    edge_pairs = {
-        (event.source_node_id, event.target_node_id)
-        for event in events
-        if event.event_type == "edge_taken"
-    }
+    edge_pairs = {(event.source_node_id, event.target_node_id) for event in events if event.event_type == "edge_taken"}
     assert ("Planner", "FetchFork") in edge_pairs
     assert ("FetchFork", "FetchFast") in edge_pairs
     assert ("FetchFork", "FetchSlow") in edge_pairs
