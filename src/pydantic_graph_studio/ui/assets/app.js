@@ -13,6 +13,8 @@
     useEdgesState,
     useNodesState,
   } = RF;
+  const dagreLib = window.dagre;
+  const hasDagre = dagreLib && dagreLib.graphlib && typeof dagreLib.layout === "function";
 
   const statusClasses = {
     idle: "studio-node--idle",
@@ -103,7 +105,125 @@
 
   const edgeTypes = { studio: StudioEdge };
 
-  function buildFlowGraph(graph) {
+  function estimateNodeSize(data) {
+    const labelLength = (data.label || data.id || "").length;
+    const badgeCount =
+      (data.isEntry ? 1 : 0) + (data.isTerminal ? 1 : 0) + (data.isDynamic ? 1 : 0);
+    const width = Math.min(260, Math.max(160, labelLength * 7 + 90));
+    const height = 64 + badgeCount * 18;
+    return { width, height };
+  }
+
+  function buildFlowGraphDagre(graph) {
+    const nodes = [];
+    const edges = [];
+    const nodeData = new Map();
+    const sizeById = new Map();
+    const dynamicNodesBySource = new Map();
+    const entrySet = new Set(graph.entry_nodes || []);
+    const terminalSet = new Set(graph.terminal_nodes || []);
+
+    graph.nodes.forEach((node) => {
+      nodeData.set(node.node_id, {
+        id: node.node_id,
+        label: node.label || node.node_id,
+        isEntry: entrySet.has(node.node_id),
+        isTerminal: terminalSet.has(node.node_id),
+        isDynamic: false,
+      });
+    });
+
+    const edgesInput = [];
+    graph.edges.forEach((edge) => {
+      let target = edge.target_node_id;
+      if (!target) {
+        let dynamicId = dynamicNodesBySource.get(edge.source_node_id);
+        if (!dynamicId) {
+          dynamicId = `dynamic-${edge.source_node_id}`;
+          dynamicNodesBySource.set(edge.source_node_id, dynamicId);
+          nodeData.set(dynamicId, {
+            id: dynamicId,
+            label: "Dynamic target",
+            isEntry: false,
+            isTerminal: false,
+            isDynamic: true,
+          });
+        }
+        target = dynamicId;
+      }
+      edgesInput.push({
+        source: edge.source_node_id,
+        target,
+        dynamic: edge.dynamic,
+      });
+    });
+
+    const dagreGraph = new dagreLib.graphlib.Graph();
+    dagreGraph.setGraph({
+      rankdir: "TB",
+      ranksep: 120,
+      nodesep: 70,
+      marginx: 40,
+      marginy: 40,
+    });
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
+
+    nodeData.forEach((data, nodeId) => {
+      const size = estimateNodeSize(data);
+      sizeById.set(nodeId, size);
+      dagreGraph.setNode(nodeId, size);
+    });
+
+    edgesInput.forEach((edge) => {
+      dagreGraph.setEdge(edge.source, edge.target);
+    });
+
+    dagreLib.layout(dagreGraph);
+
+    nodeData.forEach((data, nodeId) => {
+      const layout = dagreGraph.node(nodeId) || { x: 0, y: 0 };
+      const size = sizeById.get(nodeId) || { width: 180, height: 72 };
+      nodes.push({
+        id: nodeId,
+        type: "studio",
+        position: {
+          x: layout.x - size.width / 2,
+          y: layout.y - size.height / 2,
+        },
+        sourcePosition: "bottom",
+        targetPosition: "top",
+        data: {
+          id: nodeId,
+          label: data.label || nodeId,
+          status: "idle",
+          isEntry: data.isEntry,
+          isTerminal: data.isTerminal,
+          isDynamic: data.isDynamic,
+        },
+      });
+    });
+
+    edgesInput.forEach((edge, index) => {
+      edges.push({
+        id: `e-${edge.source}-${edge.target}-${index}`,
+        source: edge.source,
+        target: edge.target,
+        type: "studio",
+        animated: false,
+        style: {
+          ...edgeBaseStyle,
+          ...(edge.dynamic ? { strokeDasharray: "4 3" } : null),
+        },
+        data: {
+          dynamic: edge.dynamic,
+        },
+      });
+    });
+
+    return { nodes, edges };
+  }
+
+  function buildFlowGraphHeuristic(graph) {
     const nodes = [];
     const edges = [];
     const positions = new Map();
@@ -376,6 +496,13 @@
     });
 
     return { nodes, edges };
+  }
+
+  function buildFlowGraph(graph) {
+    if (hasDagre) {
+      return buildFlowGraphDagre(graph);
+    }
+    return buildFlowGraphHeuristic(graph);
   }
 
   function App() {
