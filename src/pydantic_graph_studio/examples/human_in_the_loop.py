@@ -45,22 +45,22 @@ class Draft(BaseNode[None, None, str]):
 class AwaitApproval(BaseNode[None, None, str]):
     attempt: int
 
-    async def run(self, ctx: GraphRunContext) -> WaitForApproval | Finalize:
+    async def run(self, ctx: GraphRunContext) -> WaitForApproval:
         await asyncio.sleep(0.2)
-        approved = _flag("HITL_APPROVED", default=False)
-        auto_approve = AUTO_APPROVE_AFTER > 0 and self.attempt >= AUTO_APPROVE_AFTER
-        if approved or auto_approve:
-            return Finalize(message="Approved by human")
-        return WaitForApproval(attempt=self.attempt + 1)
+        return WaitForApproval(attempt=self.attempt)
 
 
 @dataclass
 class WaitForApproval(BaseNode[None, None, str]):
     attempt: int
 
-    async def run(self, ctx: GraphRunContext) -> AwaitApproval:
+    async def run(self, ctx: GraphRunContext) -> AwaitApproval | Finalize:
         await asyncio.sleep(0.3)
-        return AwaitApproval(attempt=self.attempt)
+        approved = _flag("HITL_APPROVED", default=False)
+        auto_approve = AUTO_APPROVE_AFTER > 0 and self.attempt >= AUTO_APPROVE_AFTER
+        if approved or auto_approve:
+            return Finalize(message="Approved by human")
+        return AwaitApproval(attempt=self.attempt + 1)
 
 
 @dataclass
