@@ -321,7 +321,15 @@ graph = Graph(nodes=[Start])
 def test_main_example_list(capsys: pytest.CaptureFixture[str]) -> None:
     cli.main(["example", "list"])
     out = capsys.readouterr().out
-    assert "graph" in out
+    for name in [
+        "graph",
+        "parallel-joins",
+        "error-handling",
+        "tool-usage",
+        "streaming-events",
+        "human-in-the-loop",
+    ]:
+        assert name in out
 
 
 def test_main_example_run(monkeypatch: pytest.MonkeyPatch) -> None:

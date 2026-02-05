@@ -9,8 +9,16 @@ Run built-in examples without cloning the repo:
 ```bash
 uvx pydantic-graph-studio example list
 uvx pydantic-graph-studio example graph
-uvx pydantic-graph-studio example ai-concierge
+uvx pydantic-graph-studio example parallel-joins
 ```
+
+Built-in example themes:
+- `graph` (branching and loops)
+- `parallel-joins` (parallel/fork-join)
+- `error-handling` (explicit error path and recovery)
+- `tool-usage` (tool invocation and result handling)
+- `streaming-events` (event-rich run)
+- `human-in-the-loop` (simulated user input step)
 
 The studio opens in your browser automatically. It binds to port 8000 by default and retries 8001 if 8000 is already in use and you did not set `--port`.
 
@@ -43,7 +51,11 @@ The repository examples are in `examples/`:
 
 ```bash
 pgraph examples/graph.py:graph
-pgraph examples/ai_concierge.py:graph
+pgraph examples/parallel_joins.py:graph
+pgraph examples/error_handling.py:graph
+pgraph examples/tool_usage.py:graph
+pgraph examples/streaming_events.py:graph
+pgraph examples/human_in_the_loop.py:graph
 ```
 
 ## Release

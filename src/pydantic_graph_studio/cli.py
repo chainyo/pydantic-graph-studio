@@ -16,9 +16,10 @@ from typing import Any
 from pydantic_graph import Graph
 from pydantic_graph.nodes import BaseNode
 
-from pydantic_graph_studio import examples
 from pydantic_graph_studio.introspection import build_graph_model
 from pydantic_graph_studio.server import create_app
+
+from . import examples
 
 BetaGraph: type[Any] | None = None
 try:  # pragma: no cover - optional beta support
