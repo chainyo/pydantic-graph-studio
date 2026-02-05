@@ -1,0 +1,54 @@
+name: Release to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Validate tag and version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - << 'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ.get("RELEASE_TAG", "")
+          if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+            raise SystemExit(f"Invalid tag format: {tag!r}. Expected vX.Y.Z")
+
+          version = None
+          for line in Path("pyproject.toml").read_text().splitlines():
+            if line.startswith("version ="):
+              version = line.split("=", 1)[1].strip().strip("\"")
+              break
+          if not version:
+            raise SystemExit("Could not find version in pyproject.toml")
+
+          expected_tag = f"v{version}"
+          if tag != expected_tag:
+            raise SystemExit(f"Tag/version mismatch: tag={tag!r} pyproject={version!r}")
+
+          print(f"Tag/version OK: {tag}")
+          PY
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
