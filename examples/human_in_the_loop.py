@@ -24,34 +24,43 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-MAX_RETRIES = _int_env("HITL_MAX_RETRIES", default=1)
+AUTO_APPROVE_AFTER = _int_env("HITL_AUTO_APPROVE_AFTER", default=2)
 
 
 @dataclass
 class Start(BaseNode[None, None, str]):
-    async def run(self, ctx: GraphRunContext) -> RequestInput:
+    async def run(self, ctx: GraphRunContext) -> Draft:
         await asyncio.sleep(0.1)
-        return RequestInput(attempt=0)
+        return Draft()
 
 
 @dataclass
-class RequestInput(BaseNode[None, None, str]):
-    attempt: int
-
-    async def run(self, ctx: GraphRunContext) -> Review:
-        await asyncio.sleep(0.25)
-        return Review(attempt=self.attempt)
-
-
-@dataclass
-class Review(BaseNode[None, None, str]):
-    attempt: int
-
-    async def run(self, ctx: GraphRunContext) -> RequestInput | Finalize:
+class Draft(BaseNode[None, None, str]):
+    async def run(self, ctx: GraphRunContext) -> AwaitApproval:
         await asyncio.sleep(0.2)
-        if _flag("HITL_APPROVED", default=False) or self.attempt >= MAX_RETRIES:
+        return AwaitApproval(attempt=0)
+
+
+@dataclass
+class AwaitApproval(BaseNode[None, None, str]):
+    attempt: int
+
+    async def run(self, ctx: GraphRunContext) -> WaitForApproval | Finalize:
+        await asyncio.sleep(0.2)
+        approved = _flag("HITL_APPROVED", default=False)
+        auto_approve = AUTO_APPROVE_AFTER > 0 and self.attempt >= AUTO_APPROVE_AFTER
+        if approved or auto_approve:
             return Finalize(message="Approved by human")
-        return RequestInput(attempt=self.attempt + 1)
+        return WaitForApproval(attempt=self.attempt + 1)
+
+
+@dataclass
+class WaitForApproval(BaseNode[None, None, str]):
+    attempt: int
+
+    async def run(self, ctx: GraphRunContext) -> AwaitApproval:
+        await asyncio.sleep(0.3)
+        return AwaitApproval(attempt=self.attempt)
 
 
 @dataclass
@@ -63,5 +72,5 @@ class Finalize(BaseNode[None, None, str]):
         return End(self.message)
 
 
-NODE_TYPES: list[type[BaseNode[None, None, str]]] = [Start, RequestInput, Review, Finalize]
+NODE_TYPES: list[type[BaseNode[None, None, str]]] = [Start, Draft, AwaitApproval, WaitForApproval, Finalize]
 graph: Graph[None, None, str] = Graph[None, None, str](nodes=NODE_TYPES)
