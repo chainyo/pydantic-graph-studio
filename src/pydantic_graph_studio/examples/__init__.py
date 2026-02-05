@@ -57,7 +57,7 @@ _EXAMPLES: dict[str, ExampleSpec] = {
     "graph": ExampleSpec(
         name="graph",
         title="Branching Steps",
-        description="Async branching graph with looped steps and a final End node.",
+        description="Branching loop with a decision step and a terminal end.",
         loader=_load_basic_graph,
     ),
     "parallel-joins": ExampleSpec(
