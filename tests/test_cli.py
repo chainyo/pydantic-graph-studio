@@ -13,13 +13,16 @@ from pydantic_graph import BaseNode, End, Graph, GraphRunContext
 from pydantic_graph_studio import cli
 from pydantic_graph_studio.cli import (
     CLIError,
+    _has_explicit_port,
     _load_graph,
     _load_module,
     _parse_args,
+    _parse_example_args,
     _parse_graph_ref,
     _resolve_attribute,
     _resolve_start_node,
     _run_server,
+    _select_port,
 )
 
 
@@ -61,13 +64,44 @@ def test_parse_args_defaults() -> None:
     assert args.host == "127.0.0.1"
     assert args.port == 8000
     assert args.start is None
+    assert args.no_open is False
 
 
 def test_parse_args_overrides() -> None:
-    args = _parse_args(["module:graph", "--host", "0.0.0.0", "--port", "9000", "--start", "Start"])
+    args = _parse_args(["module:graph", "--host", "0.0.0.0", "--port", "9000", "--start", "Start", "--no-open"])
     assert args.host == "0.0.0.0"
     assert args.port == 9000
     assert args.start == "Start"
+    assert args.no_open is True
+
+
+def test_parse_example_args_defaults() -> None:
+    args = _parse_example_args(["graph"])
+    assert args.name == "graph"
+    assert args.host == "127.0.0.1"
+    assert args.port == 8000
+    assert args.no_open is False
+
+
+def test_has_explicit_port() -> None:
+    assert _has_explicit_port(["--port", "9000"]) is True
+    assert _has_explicit_port(["--port=9001"]) is True
+    assert _has_explicit_port(["--host", "0.0.0.0"]) is False
+
+
+def test_select_port_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_available(host: str, port: int) -> bool:
+        return port == 8001
+
+    monkeypatch.setattr(cli, "_is_port_available", fake_available)
+    selected = _select_port("127.0.0.1", 8000, allow_fallback=True)
+    assert selected == 8001
+
+
+def test_select_port_no_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, "_is_port_available", lambda *args, **kwargs: False)
+    with pytest.raises(CLIError, match="already in use"):
+        _select_port("127.0.0.1", 8000, allow_fallback=False)
 
 
 def test_load_module_missing_file(tmp_path: Path) -> None:
@@ -210,7 +244,7 @@ def test_run_server_rejects_invalid_port() -> None:
     nodes: list[type[BaseNode[None, None, int]]] = [Alpha]
     graph = Graph[None, None, int](nodes=nodes)
     with pytest.raises(CLIError, match="Port must be between"):
-        _run_server(graph, Alpha(), host="127.0.0.1", port=0)
+        _run_server(graph, Alpha(), host="127.0.0.1", port=0, open_browser=False)
 
 
 def test_run_server_imports_uvicorn(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -226,7 +260,7 @@ def test_run_server_imports_uvicorn(monkeypatch: pytest.MonkeyPatch, capsys: pyt
         called["log_level"] = log_level
 
     monkeypatch.setitem(sys.modules, "uvicorn", types.SimpleNamespace(run=fake_run))
-    _run_server(graph, Alpha(), host="127.0.0.1", port=8001)
+    _run_server(graph, Alpha(), host="127.0.0.1", port=8001, open_browser=False)
 
     assert called["host"] == "127.0.0.1"
     assert called["port"] == 8001
@@ -240,7 +274,7 @@ def test_run_server_missing_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
     graph = Graph[None, None, int](nodes=nodes)
     monkeypatch.setitem(sys.modules, "uvicorn", None)
     with pytest.raises(CLIError, match="uvicorn is required"):
-        _run_server(graph, Alpha(), host="127.0.0.1", port=8002)
+        _run_server(graph, Alpha(), host="127.0.0.1", port=8002, open_browser=False)
 
 
 def test_main_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -263,17 +297,62 @@ graph = Graph(nodes=[Start])
 
     called: dict[str, object] = {}
 
-    def fake_run_server(graph: object, start_node: object, host: str, port: int) -> None:
+    def fake_run_server(
+        graph: object,
+        start_node: object,
+        host: str,
+        port: int,
+        open_browser: bool,
+    ) -> None:
         called["graph"] = graph
         called["start_node"] = start_node
         called["host"] = host
         called["port"] = port
+        called["open_browser"] = open_browser
 
     monkeypatch.setattr(cli, "_run_server", fake_run_server)
-    cli.main([f"{module_path}:graph", "--host", "0.0.0.0", "--port", "9001"])
+    cli.main([f"{module_path}:graph", "--host", "0.0.0.0", "--port", "9001", "--no-open"])
 
     assert called["host"] == "0.0.0.0"
     assert called["port"] == 9001
+    assert called["open_browser"] is False
+
+
+def test_main_example_list(capsys: pytest.CaptureFixture[str]) -> None:
+    cli.main(["example", "list"])
+    out = capsys.readouterr().out
+    assert "graph" in out
+
+
+def test_main_example_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    called: dict[str, object] = {}
+
+    def fake_run_server(
+        graph: object,
+        start_node: object,
+        host: str,
+        port: int,
+        open_browser: bool,
+    ) -> None:
+        called["host"] = host
+        called["port"] = port
+        called["open_browser"] = open_browser
+
+    monkeypatch.setattr(cli, "_run_server", fake_run_server)
+    monkeypatch.setattr(cli, "_select_port", lambda *args, **kwargs: 8010)
+    cli.main(["example", "graph", "--no-open"])
+
+    assert called["host"] == "127.0.0.1"
+    assert called["port"] == 8010
+    assert called["open_browser"] is False
+
+
+def test_main_example_unknown(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["example", "nope"])
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "Unknown example" in captured.err
 
 
 def test_main_error_prints_and_exits(capsys: pytest.CaptureFixture[str]) -> None:

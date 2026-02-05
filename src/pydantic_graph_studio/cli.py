@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import importlib
 import importlib.util
+import socket
 import sys
+import threading
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +16,7 @@ from typing import Any
 from pydantic_graph import Graph
 from pydantic_graph.nodes import BaseNode
 
+from pydantic_graph_studio import examples
 from pydantic_graph_studio.introspection import build_graph_model
 from pydantic_graph_studio.server import create_app
 
@@ -38,11 +42,17 @@ class CLIError(RuntimeError):
 def main(argv: list[str] | None = None) -> None:
     """CLI entrypoint for the `pgraph` launcher."""
 
-    args = _parse_args(argv)
+    args_list = list(argv) if argv is not None else sys.argv[1:]
     try:
+        if args_list and args_list[0] == "example":
+            _run_example_command(args_list[1:])
+            return
+
+        args = _parse_args(args_list)
         graph = _load_graph(args.graph_ref)
         start_node = _resolve_start_node(graph, args.start)
-        _run_server(graph, start_node, host=args.host, port=args.port)
+        port = _select_port(args.host, args.port, allow_fallback=not _has_explicit_port(args_list))
+        _run_server(graph, start_node, host=args.host, port=port, open_browser=not args.no_open)
     except CLIError as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -72,7 +82,75 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--start",
         help="Explicit node id to use as the entry point",
     )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Disable automatically opening the browser",
+    )
     return parser.parse_args(argv)
+
+
+def _parse_example_args(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="pgraph example",
+        description="Launch the local studio with a built-in example graph.",
+    )
+    parser.add_argument(
+        "name",
+        nargs="?",
+        help="Example name or 'list' to show available examples",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind the local server (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind the local server (default: 8000)",
+    )
+    parser.add_argument(
+        "--start",
+        help="Explicit node id to use as the entry point",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="Disable automatically opening the browser",
+    )
+    return parser.parse_args(argv)
+
+
+def _run_example_command(argv: list[str]) -> None:
+    args = _parse_example_args(argv)
+    if args.name is None or args.name == "list":
+        _print_examples()
+        return
+
+    try:
+        example = examples.get_example(args.name)
+    except KeyError as exc:
+        available = ", ".join(spec.name for spec in examples.list_examples())
+        raise CLIError(f"Unknown example '{args.name}'. Available examples: {available}") from exc
+
+    graph = example.loader()
+    start_node = _resolve_start_node(graph, args.start)
+    port = _select_port(args.host, args.port, allow_fallback=not _has_explicit_port(argv))
+    _run_server(graph, start_node, host=args.host, port=port, open_browser=not args.no_open)
+
+
+def _print_examples() -> None:
+    for spec in examples.list_examples():
+        print(f"{spec.name} - {spec.description}")
+
+
+def _has_explicit_port(argv: list[str]) -> bool:
+    for arg in argv:
+        if arg == "--port" or arg.startswith("--port="):
+            return True
+    return False
 
 
 def _load_graph(graph_ref: str) -> Any:
@@ -183,6 +261,7 @@ def _run_server(
     *,
     host: str,
     port: int,
+    open_browser: bool,
 ) -> None:
     if port <= 0 or port > 65535:
         raise CLIError("Port must be between 1 and 65535")
@@ -193,9 +272,42 @@ def _run_server(
     except ModuleNotFoundError as exc:
         raise CLIError("uvicorn is required to run the server") from exc
 
-    print(f"Studio running at http://{host}:{port}")
+    url = f"http://{host}:{port}"
+    print(f"Studio running at {url}")
+    if open_browser:
+        _open_browser(url)
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 def _is_beta_graph(graph: Any) -> bool:
     return BetaGraph is not None and isinstance(graph, BetaGraph)
+
+
+def _select_port(host: str, port: int, *, allow_fallback: bool) -> int:
+    if _is_port_available(host, port):
+        return port
+    fallback = port + 1
+    if allow_fallback and fallback <= 65535 and _is_port_available(host, fallback):
+        return fallback
+    raise CLIError(f"Port {port} is already in use. Choose another port with --port.")
+
+
+def _is_port_available(host: str, port: int) -> bool:
+    try:
+        with socket.create_server((host, port)) as server:
+            server.settimeout(0.1)
+            return True
+    except OSError:
+        return False
+
+
+def _open_browser(url: str) -> None:
+    def _open() -> None:
+        try:
+            webbrowser.open(url, new=2)
+        except Exception:  # pragma: no cover - best effort
+            return
+
+    timer = threading.Timer(0.35, _open)
+    timer.daemon = True
+    timer.start()
