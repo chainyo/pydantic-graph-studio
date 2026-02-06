@@ -37,6 +37,33 @@
 
   const nodeBase = "studio-node";
 
+  function formatApprovalContext(context) {
+    if (context === null || context === undefined) {
+      return "";
+    }
+    if (typeof context === "string") {
+      return context;
+    }
+    try {
+      return JSON.stringify(context, null, 2);
+    } catch (_error) {
+      return String(context);
+    }
+  }
+
+  function extractNumber(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return null;
+  }
+
   function StudioNode({ data }) {
     const statusClass = statusClasses[data.status || "idle"] || statusClasses.idle;
     const badges = [];
@@ -510,6 +537,9 @@
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
     const [status, setStatus] = useState({ phase: "idle", runId: null, error: null });
+    const [toolActivity, setToolActivity] = useState([]);
+    const [pendingInput, setPendingInput] = useState(null);
+    const [streaming, setStreaming] = useState({ current: 0, total: null, chunks: [] });
     const eventSourceRef = useRef(null);
 
     const statusLabel = useMemo(() => {
@@ -572,6 +602,49 @@
           },
         })),
       );
+      setToolActivity([]);
+      setPendingInput(null);
+      setStreaming({ current: 0, total: null, chunks: [] });
+    };
+
+    const submitInput = async (response) => {
+      if (!status.runId || !pendingInput) {
+        return;
+      }
+      const requestId = pendingInput.requestId;
+      setPendingInput((current) => {
+        if (!current || current.requestId !== requestId) {
+          return current;
+        }
+        return { ...current, submitting: true, error: null };
+      });
+      try {
+        const httpResponse = await fetch("/api/input", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            run_id: status.runId,
+            request_id: requestId,
+            response,
+          }),
+        });
+        if (!httpResponse.ok) {
+          const message = await httpResponse.text();
+          throw new Error(message || `Failed to submit input (${httpResponse.status})`);
+        }
+        setPendingInput(null);
+      } catch (error) {
+        setPendingInput((current) => {
+          if (!current || current.requestId !== requestId) {
+            return current;
+          }
+          return {
+            ...current,
+            submitting: false,
+            error: error.message || "Failed to submit input",
+          };
+        });
+      }
     };
 
     const handleEvent = (payload) => {
@@ -614,8 +687,78 @@
             }),
           );
           break;
+        case "tool_call":
+          setToolActivity((current) => {
+            const existingIndex = current.findIndex((item) => item.callId === payload.call_id);
+            const entry = {
+              callId: payload.call_id,
+              nodeId: payload.node_id,
+              toolName: payload.tool_name,
+              arguments: payload.arguments,
+              output: null,
+              success: null,
+            };
+            if (existingIndex >= 0) {
+              const next = [...current];
+              next[existingIndex] = { ...next[existingIndex], ...entry };
+              return next;
+            }
+            return [entry, ...current];
+          });
+          break;
+        case "tool_result":
+          setToolActivity((current) => {
+            const existingIndex = current.findIndex((item) => item.callId === payload.call_id);
+            const entry = {
+              callId: payload.call_id,
+              nodeId: payload.node_id,
+              toolName: payload.tool_name,
+              output: payload.output,
+              success: payload.success,
+            };
+            if (existingIndex >= 0) {
+              const next = [...current];
+              next[existingIndex] = { ...next[existingIndex], ...entry };
+              return next;
+            }
+            return [entry, ...current];
+          });
+          if (payload.tool_name === "stream_chunk") {
+            setStreaming((current) => {
+              const output = payload.output && typeof payload.output === "object" ? payload.output : {};
+              const tick = extractNumber(output.tick) ?? current.current;
+              const total = extractNumber(output.total) ?? current.total;
+              const chunkText = typeof output.chunk === "string" ? output.chunk : null;
+              const chunks = chunkText
+                ? [chunkText, ...current.chunks.filter((item) => item !== chunkText)].slice(0, 8)
+                : current.chunks;
+              return {
+                current: Math.max(current.current, tick || 0),
+                total,
+                chunks,
+              };
+            });
+          }
+          break;
+        case "input_request":
+          setPendingInput({
+            requestId: payload.request_id,
+            nodeId: payload.node_id,
+            prompt: payload.prompt,
+            context: payload.context,
+            options: payload.options?.length ? payload.options : ["yes", "no"],
+            submitting: false,
+            error: null,
+          });
+          break;
+        case "input_response":
+          setPendingInput((current) =>
+            current && current.requestId === payload.request_id ? null : current,
+          );
+          break;
         case "run_end":
           setStatus((current) => ({ ...current, phase: "ready" }));
+          setPendingInput(null);
           if (eventSourceRef.current) {
             eventSourceRef.current.close();
             eventSourceRef.current = null;
@@ -636,6 +779,7 @@
             phase: "error",
             error: payload.message || "Execution error",
           }));
+          setPendingInput(null);
           if (eventSourceRef.current) {
             eventSourceRef.current.close();
             eventSourceRef.current = null;
@@ -695,7 +839,7 @@
       }
     };
 
-    const content = graph
+    const graphCanvas = graph
       ? e(
           Flow,
           {
@@ -728,6 +872,66 @@
           { className: "flex h-full items-center justify-center studio-empty" },
           status.error || "Loading graph…",
         );
+
+    const toolFeed = e(
+      "aside",
+      { className: "studio-sidebar" },
+      e(
+        "section",
+        { className: "studio-stream-panel" },
+        e("p", { className: "studio-sidebar-title" }, "Streaming"),
+        e(
+          "p",
+          { className: "studio-stream-counter" },
+          streaming.total ? `${streaming.current}/${streaming.total} chunks` : `${streaming.current} chunks`,
+        ),
+        streaming.chunks.length
+          ? e(
+              "div",
+              { className: "studio-stream-list" },
+              streaming.chunks.map((chunk, index) =>
+                e("p", { key: `${index}-${chunk}`, className: "studio-stream-item" }, chunk),
+              ),
+            )
+          : e("p", { className: "studio-sidebar-empty" }, "No stream chunks yet"),
+      ),
+      e("p", { className: "studio-sidebar-title" }, "Tool Activity"),
+      toolActivity.length
+        ? e(
+            "div",
+            { className: "studio-tool-list" },
+            toolActivity.map((item) =>
+              e(
+                "article",
+                { key: item.callId, className: "studio-tool-item" },
+                e("p", { className: "studio-tool-name" }, item.toolName),
+                e("p", { className: "studio-tool-meta" }, `node ${item.nodeId}`),
+                item.arguments !== undefined
+                  ? e(
+                      "pre",
+                      { className: "studio-tool-json" },
+                      JSON.stringify(item.arguments, null, 2),
+                    )
+                  : null,
+                item.output !== null
+                  ? e(
+                      "pre",
+                      { className: "studio-tool-json" },
+                      JSON.stringify(item.output, null, 2),
+                    )
+                  : e("p", { className: "studio-tool-pending" }, "Waiting for result…"),
+              ),
+            ),
+          )
+        : e("p", { className: "studio-sidebar-empty" }, "No tool calls yet"),
+    );
+
+    const content = e(
+      "div",
+      { className: "studio-main" },
+      e("section", { className: "studio-canvas" }, graphCanvas),
+      toolFeed,
+    );
 
     return e(
       "div",
@@ -771,6 +975,45 @@
         { className: "flex-1" },
         content,
       ),
+      pendingInput
+        ? e(
+            "div",
+            { className: "studio-modal-backdrop" },
+            e(
+              "div",
+              { className: "studio-modal" },
+              e("p", { className: "studio-modal-title" }, "Approval Required"),
+              e("p", { className: "studio-modal-node" }, `Node: ${pendingInput.nodeId}`),
+              e("p", { className: "studio-modal-prompt" }, pendingInput.prompt),
+              pendingInput.context !== null && pendingInput.context !== undefined
+                ? e(
+                    "pre",
+                    { className: "studio-modal-context" },
+                    formatApprovalContext(pendingInput.context),
+                  )
+                : null,
+              pendingInput.error
+                ? e("p", { className: "studio-modal-error" }, pendingInput.error)
+                : null,
+              e(
+                "div",
+                { className: "studio-modal-actions" },
+                pendingInput.options.map((option) =>
+                  e(
+                    "button",
+                    {
+                      key: option,
+                      className: "studio-modal-button",
+                      disabled: pendingInput.submitting,
+                      onClick: () => submitInput(option),
+                    },
+                    option,
+                  ),
+                ),
+              ),
+            ),
+          )
+        : null,
     );
   }
 

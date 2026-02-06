@@ -3,6 +3,7 @@
 from pydantic_graph_studio.cli import main
 from pydantic_graph_studio.introspection import build_graph_model, serialize_graph
 from pydantic_graph_studio.runtime import (
+    InteractionHub,
     RunHooks,
     instrument_graph_run,
     iter_instrumented,
@@ -18,9 +19,13 @@ from pydantic_graph_studio.schemas import (
     GraphEdge,
     GraphModel,
     GraphNode,
+    InputRequestEvent,
+    InputResponseEvent,
     NodeEndEvent,
     NodeStartEvent,
     RunEndEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     event_schema,
     export_schemas,
     graph_schema,
@@ -35,6 +40,9 @@ __all__ = [
     "GraphEdge",
     "GraphModel",
     "GraphNode",
+    "InputRequestEvent",
+    "InputResponseEvent",
+    "InteractionHub",
     "NodeEndEvent",
     "NodeStartEvent",
     "RunEndEvent",
@@ -52,4 +60,6 @@ __all__ = [
     "run_instrumented",
     "run_instrumented_sync",
     "serialize_graph",
+    "ToolCallEvent",
+    "ToolResultEvent",
 ]

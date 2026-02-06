@@ -64,6 +64,47 @@ class RunEndEvent(EventBase):
     event_type: Literal["run_end"]
 
 
+class ToolCallEvent(EventBase):
+    """Emitted when a tool call starts."""
+
+    event_type: Literal["tool_call"]
+    node_id: str
+    tool_name: str
+    call_id: str
+    arguments: Any
+
+
+class ToolResultEvent(EventBase):
+    """Emitted when a tool call completes."""
+
+    event_type: Literal["tool_result"]
+    node_id: str
+    tool_name: str
+    call_id: str
+    output: Any
+    success: bool = True
+
+
+class InputRequestEvent(EventBase):
+    """Emitted when a node requests human input."""
+
+    event_type: Literal["input_request"]
+    node_id: str
+    request_id: str
+    prompt: str
+    options: list[str]
+    context: Any | None = None
+
+
+class InputResponseEvent(EventBase):
+    """Emitted when a response is provided to an input request."""
+
+    event_type: Literal["input_response"]
+    node_id: str
+    request_id: str
+    response: str
+
+
 class ErrorEvent(EventBase):
     """Emitted when a run terminates due to an error."""
 
@@ -73,7 +114,15 @@ class ErrorEvent(EventBase):
 
 
 Event = Annotated[
-    NodeStartEvent | NodeEndEvent | EdgeTakenEvent | RunEndEvent | ErrorEvent,
+    NodeStartEvent
+    | NodeEndEvent
+    | EdgeTakenEvent
+    | RunEndEvent
+    | ToolCallEvent
+    | ToolResultEvent
+    | InputRequestEvent
+    | InputResponseEvent
+    | ErrorEvent,
     Field(discriminator="event_type"),
 ]
 

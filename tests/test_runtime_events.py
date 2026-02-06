@@ -5,7 +5,8 @@ from dataclasses import dataclass
 
 from pydantic_graph import BaseNode, End, Graph, GraphRunContext
 
-from pydantic_graph_studio.runtime import iter_run_events
+from pydantic_graph_studio.runtime import InteractionHub, iter_run_events, resolve_interaction
+from pydantic_graph_studio.schemas import InputRequestEvent
 
 
 @dataclass
@@ -24,6 +25,20 @@ class Second(BaseNode[None, None, int]):
 class Boom(BaseNode[None, None, int]):
     async def run(self, ctx: GraphRunContext) -> End[int]:
         raise RuntimeError("boom")
+
+
+@dataclass
+class AskApproval(BaseNode[None, None, int]):
+    async def run(self, ctx: GraphRunContext) -> End[int]:
+        interaction = resolve_interaction(ctx.deps)
+        assert interaction is not None
+        response = await interaction.request_input(
+            node_id=self.get_node_id(),
+            prompt="Approve?",
+            options=["yes", "no"],
+            context="draft preview",
+        )
+        return End(1 if response == "yes" else 0)
 
 
 def _collect_events(graph: Graph[None, None, int], start_node: BaseNode[None, None, int]) -> list:
@@ -69,3 +84,30 @@ def test_iter_run_events_error_emits_error_event() -> None:
     assert event_types[0] == "node_start"
     assert "error" in event_types
     assert "run_end" not in event_types
+
+
+def test_iter_run_events_interactive_input() -> None:
+    nodes: list[type[BaseNode[None, None, int]]] = [AskApproval]
+    graph = Graph[None, None, int](nodes=nodes)
+
+    async def _run() -> list:
+        interaction = InteractionHub()
+        events = []
+        async for event in iter_run_events(graph, AskApproval(), interaction=interaction):
+            events.append(event)
+            if isinstance(event, InputRequestEvent):
+                await interaction.resolve_input(event.request_id, "yes")
+        return events
+
+    events = asyncio.run(_run())
+    event_types = [event.event_type for event in events]
+    assert event_types == [
+        "node_start",
+        "input_request",
+        "input_response",
+        "node_end",
+        "run_end",
+    ]
+    input_request = events[1]
+    assert isinstance(input_request, InputRequestEvent)
+    assert input_request.context == "draft preview"

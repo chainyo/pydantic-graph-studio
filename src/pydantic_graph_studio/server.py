@@ -12,11 +12,12 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from pydantic_graph import Graph
 from pydantic_graph.nodes import BaseNode
 
 from pydantic_graph_studio.introspection import serialize_graph
-from pydantic_graph_studio.runtime import iter_run_events
+from pydantic_graph_studio.runtime import InteractionHub, iter_run_events
 from pydantic_graph_studio.schemas import Event
 
 
@@ -26,6 +27,13 @@ class RunState:
     queue: asyncio.Queue[Event]
     done: asyncio.Event
     task: asyncio.Task[None]
+    interaction: InteractionHub
+
+
+class InputResponsePayload(BaseModel):
+    run_id: str
+    request_id: str
+    response: str
 
 
 class RunRegistry:
@@ -48,6 +56,7 @@ class RunRegistry:
         run_id = uuid4().hex
         queue: asyncio.Queue[Event] = asyncio.Queue()
         done = asyncio.Event()
+        interaction = InteractionHub(run_id=run_id)
 
         async def producer() -> None:
             try:
@@ -59,6 +68,7 @@ class RunRegistry:
                     persistence=persistence,
                     inputs=inputs,
                     run_id=run_id,
+                    interaction=interaction,
                 ):
                     await queue.put(event)
             finally:
@@ -66,7 +76,13 @@ class RunRegistry:
 
         task = asyncio.create_task(producer())
         async with self._lock:
-            self._runs[run_id] = RunState(run_id=run_id, queue=queue, done=done, task=task)
+            self._runs[run_id] = RunState(
+                run_id=run_id,
+                queue=queue,
+                done=done,
+                task=task,
+                interaction=interaction,
+            )
         return run_id
 
     async def get(self, run_id: str) -> RunState | None:
@@ -164,6 +180,17 @@ def create_app(
             "Connection": "keep-alive",
         }
         return StreamingResponse(event_stream(), media_type="text/event-stream", headers=headers)
+
+    @app.post("/api/input")
+    async def submit_input(payload: InputResponsePayload) -> dict[str, bool]:
+        """Submit an interactive response for an in-flight run."""
+        run_state = await app.state.registry.get(payload.run_id)
+        if run_state is None:
+            raise HTTPException(status_code=404, detail="Unknown run_id")
+        accepted = await run_state.interaction.resolve_input(payload.request_id, payload.response)
+        if not accepted:
+            raise HTTPException(status_code=400, detail="Unknown request_id")
+        return {"accepted": True}
 
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
