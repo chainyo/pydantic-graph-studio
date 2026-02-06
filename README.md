@@ -63,7 +63,7 @@ pgraph examples/human_in_the_loop.py:graph
 Releases are published automatically to PyPI via GitHub Actions using Trusted Publishing (OIDC).
 
 Release rules:
-- Tag format MUST be `vX.Y.Z` (e.g., `v0.1.0`)
+- Tag format MUST be `vX.Y.Z` (e.g., `v0.2.0`)
 - Tag version MUST match `version` in `pyproject.toml`
 - Publish happens when a GitHub Release is published
 

@@ -1,6 +1,6 @@
 [project]
 name = "pydantic-graph-studio"
-version = "0.1.0"
+version = "0.2.0"
 description = "A lightweight studio/CLI scaffold for pydantic-graph projects."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.12"
